@@ -1,0 +1,9 @@
+*.fastq
+*.bam
+*.bai
+*.vcf
+*.sra
+*.html
+*.json
+*.gz
+*.zip
