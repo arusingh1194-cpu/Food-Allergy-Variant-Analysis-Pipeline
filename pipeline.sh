@@ -1,17 +1,27 @@
 #!/bin/bash
 
 ########################################################
-# FOOD ALLERGY VARIANT ANALYSIS PIPELINE
-# STAT6 and FCER1A
+# ADVANCED FOOD ALLERGY VARIANT ANALYSIS PIPELINE
 ########################################################
 
 echo "========================================="
 echo " FOOD ALLERGY NGS PIPELINE STARTED"
 echo "========================================="
 
-SAMPLE=SRR562646
 REF=STAT6_FCER1A.fasta
-THREADS=4
+THREADS=8
+
+########################################################
+# MULTI-SAMPLE SUPPORT
+########################################################
+
+for SAMPLE in $(cat samples.txt)
+do
+
+echo ""
+echo "========================================="
+echo "Processing Sample: $SAMPLE"
+echo "========================================="
 
 ########################################################
 # STEP 1: DOWNLOAD DATA
@@ -22,216 +32,232 @@ if [ ! -f "${SAMPLE}_1.fastq" ]; then
     echo "Downloading SRA sample..."
 
     prefetch $SAMPLE
-    fasterq-dump $SAMPLE -e $THREADS
 
-else
-    echo "FASTQ files already exist."
+    fasterq-dump $SAMPLE \
+    -e $THREADS
+
 fi
 
 ########################################################
 # STEP 2: FASTQC
 ########################################################
 
-if [ ! -f "${SAMPLE}_1_fastqc.html" ]; then
-
-    fastqc ${SAMPLE}_1.fastq
-    fastqc ${SAMPLE}_2.fastq
-
-fi
+fastqc ${SAMPLE}_1.fastq
+fastqc ${SAMPLE}_2.fastq
 
 ########################################################
 # STEP 3: TRIMMING
 ########################################################
 
-if [ ! -f "${SAMPLE}_1_clean.fastq" ]; then
-
-    fastp \
-    -i ${SAMPLE}_1.fastq \
-    -I ${SAMPLE}_2.fastq \
-    -o ${SAMPLE}_1_clean.fastq \
-    -O ${SAMPLE}_2_clean.fastq \
-    --cut_right \
-    --cut_right_mean_quality 20 \
-    --length_required 30 \
-    -h fastp_report.html \
-    -j fastp_report.json
-
-fi
+fastp \
+-i ${SAMPLE}_1.fastq \
+-I ${SAMPLE}_2.fastq \
+-o ${SAMPLE}_1_clean.fastq \
+-O ${SAMPLE}_2_clean.fastq \
+--cut_right \
+--cut_right_mean_quality 20 \
+--length_required 30 \
+-w $THREADS \
+-h ${SAMPLE}_fastp.html \
+-j ${SAMPLE}_fastp.json
 
 ########################################################
 # STEP 4: FASTQC AFTER CLEANING
 ########################################################
 
-if [ ! -f "${SAMPLE}_1_clean_fastqc.html" ]; then
-
-    fastqc ${SAMPLE}_1_clean.fastq
-    fastqc ${SAMPLE}_2_clean.fastq
-
-fi
+fastqc ${SAMPLE}_1_clean.fastq
+fastqc ${SAMPLE}_2_clean.fastq
 
 ########################################################
-# STEP 5: REFERENCE INDEX
+# STEP 5: INDEX REFERENCE
 ########################################################
 
 if [ ! -f "${REF}.bwt" ]; then
 
     bwa index $REF
+
     samtools faidx $REF
 
 fi
 
 ########################################################
-# STEP 6: ALIGNMENT + SORTING
+# STEP 6: ALIGNMENT
 ########################################################
 
-if [ ! -f "aligned_sorted.bam" ]; then
-
-    bwa mem -t $THREADS \
-    $REF \
-    ${SAMPLE}_1_clean.fastq \
-    ${SAMPLE}_2_clean.fastq | \
-    samtools sort -@ $THREADS \
-    -o aligned_sorted.bam
-
-fi
+bwa mem \
+-t $THREADS \
+$REF \
+${SAMPLE}_1_clean.fastq \
+${SAMPLE}_2_clean.fastq | \
+samtools sort \
+-@ $THREADS \
+-o ${SAMPLE}_sorted.bam
 
 ########################################################
 # STEP 7: BAM INDEX
 ########################################################
 
-if [ ! -f "aligned_sorted.bam.bai" ]; then
-
-    samtools index aligned_sorted.bam
-
-fi
+samtools index ${SAMPLE}_sorted.bam
 
 ########################################################
 # STEP 8: VARIANT CALLING
 ########################################################
 
-if [ ! -f "variants.vcf" ]; then
-
-    bcftools mpileup \
-    -f $REF \
-    aligned_sorted.bam | \
-    bcftools call -mv \
-    -Ov \
-    -o variants.vcf
-
-fi
+bcftools mpileup \
+-f $REF \
+${SAMPLE}_sorted.bam | \
+bcftools call \
+-mv \
+-Ov \
+-o ${SAMPLE}_variants.vcf
 
 ########################################################
-# STEP 9: TOTAL VARIANT COUNT
+# STEP 9: VARIANT ANNOTATION (VEP)
 ########################################################
 
-TOTAL=$(grep -v "^#" variants.vcf | wc -l)
-
-echo "Total variants = $TOTAL"
+vep \
+-i ${SAMPLE}_variants.vcf \
+-o ${SAMPLE}_annotated.txt \
+--cache \
+--assembly GRCh38 \
+--sift b \
+--polyphen b
 
 ########################################################
 # STEP 10: GENE-WISE EXTRACTION
 ########################################################
 
-grep "NC_000012" variants.vcf > STAT6_variants.txt
-grep "NC_000001" variants.vcf > FCER1A_variants.txt
+grep "NC_000012" \
+${SAMPLE}_variants.vcf \
+> ${SAMPLE}_STAT6_variants.txt
 
-STAT6_COUNT=$(grep -v "^#" STAT6_variants.txt | wc -l)
-FCER1A_COUNT=$(grep -v "^#" FCER1A_variants.txt | wc -l)
+grep "NC_000001" \
+${SAMPLE}_variants.vcf \
+> ${SAMPLE}_FCER1A_variants.txt
+
+STAT6_COUNT=$(grep -v "^#" ${SAMPLE}_STAT6_variants.txt | wc -l)
+
+FCER1A_COUNT=$(grep -v "^#" ${SAMPLE}_FCER1A_variants.txt | wc -l)
+
+TOTAL=$(grep -v "^#" ${SAMPLE}_variants.vcf | wc -l)
 
 ########################################################
 # STEP 11: VARIANT TABLES
 ########################################################
 
 echo -e "Chromosome\tPosition\tREF\tALT\tQUAL" \
-> STAT6_variant_table.tsv
+> ${SAMPLE}_STAT6_table.tsv
 
-grep -v "^#" STAT6_variants.txt | \
+grep -v "^#" \
+${SAMPLE}_STAT6_variants.txt | \
 awk '{print $1"\t"$2"\t"$4"\t"$5"\t"$6}' \
->> STAT6_variant_table.tsv
-
+>> ${SAMPLE}_STAT6_table.tsv
 
 echo -e "Chromosome\tPosition\tREF\tALT\tQUAL" \
-> FCER1A_variant_table.tsv
+> ${SAMPLE}_FCER1A_table.tsv
 
-grep -v "^#" FCER1A_variants.txt | \
+grep -v "^#" \
+${SAMPLE}_FCER1A_variants.txt | \
 awk '{print $1"\t"$2"\t"$4"\t"$5"\t"$6}' \
->> FCER1A_variant_table.tsv
+>> ${SAMPLE}_FCER1A_table.tsv
 
 ########################################################
-# STEP 12: SNP TYPE STATISTICS
+# STEP 12: SNP STATISTICS
 ########################################################
 
-grep -v "^#" variants.vcf | \
+grep -v "^#" ${SAMPLE}_variants.vcf | \
 awk '{print $4">"$5}' | \
-sort | uniq -c > snp_statistics.txt
+sort | uniq -c \
+> ${SAMPLE}_snp_statistics.txt
 
 ########################################################
-# STEP 13: PIE CHART DATA
+# STEP 13: GENERATE PLOT
 ########################################################
 
-echo "STAT6 $STAT6_COUNT" > piechart_data.txt
-echo "FCER1A $FCER1A_COUNT" >> piechart_data.txt
+echo "STAT6 $STAT6_COUNT" > counts.txt
+echo "FCER1A $FCER1A_COUNT" >> counts.txt
+
+gnuplot << EOF
+
+set terminal png
+set output "${SAMPLE}_variant_counts.png"
+
+set style data histograms
+set style fill solid
+
+set xlabel "Genes"
+set ylabel "Variant Count"
+
+plot 'counts.txt' using 2:xtic(1) title 'Variants'
+
+EOF
 
 ########################################################
 # STEP 14: FINAL REPORT
 ########################################################
 
 echo "Food Allergy Variant Analysis Report" \
-> final_report.txt
+> ${SAMPLE}_final_report.txt
 
-echo "===================================" \
->> final_report.txt
+echo "==================================" \
+>> ${SAMPLE}_final_report.txt
 
-echo "" >> final_report.txt
+echo "" >> ${SAMPLE}_final_report.txt
 
 echo "Sample ID: $SAMPLE" \
->> final_report.txt
+>> ${SAMPLE}_final_report.txt
 
 echo "Total Variants: $TOTAL" \
->> final_report.txt
+>> ${SAMPLE}_final_report.txt
 
 echo "STAT6 Variants: $STAT6_COUNT" \
->> final_report.txt
+>> ${SAMPLE}_final_report.txt
 
 echo "FCER1A Variants: $FCER1A_COUNT" \
->> final_report.txt
+>> ${SAMPLE}_final_report.txt
 
-echo "" >> final_report.txt
+echo "" >> ${SAMPLE}_final_report.txt
 
 echo "SNP Distribution" \
->> final_report.txt
+>> ${SAMPLE}_final_report.txt
 
-cat snp_statistics.txt >> final_report.txt
+cat ${SAMPLE}_snp_statistics.txt \
+>> ${SAMPLE}_final_report.txt
 
 ########################################################
-
-########################################################
-# STEP 15: DISPLAY RESULTS ON SCREEN
+# STEP 15: DISPLAY RESULTS
 ########################################################
 
 echo ""
-echo "========================================="
-echo "           ANALYSIS SUMMARY"
-echo "========================================="
-
-echo ""
-echo "===== FINAL REPORT ====="
-cat final_report.txt
+echo "===== REPORT ====="
+cat ${SAMPLE}_final_report.txt
 
 echo ""
 echo "===== FIRST 10 STAT6 VARIANTS ====="
-head STAT6_variant_table.tsv
+head ${SAMPLE}_STAT6_table.tsv
 
 echo ""
 echo "===== FIRST 10 FCER1A VARIANTS ====="
-head FCER1A_variant_table.tsv
+head ${SAMPLE}_FCER1A_table.tsv
 
-echo ""
-echo "===== SNP DISTRIBUTION ====="
-cat snp_statistics.txt
+########################################################
+# STEP 16: CLEANUP
+########################################################
+
+rm -f *.fastq
+rm -f *.sra
+
+echo "Temporary files removed."
+
+done
+
+########################################################
+# STEP 17: MULTIQC REPORT
+########################################################
+
+multiqc . -o multiqc_output
 
 echo ""
 echo "========================================="
 echo " PIPELINE COMPLETED SUCCESSFULLY"
 echo "========================================="
-
