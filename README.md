@@ -29,13 +29,20 @@ chmod +x pipeline.sh
 ./pipeline.sh
 ## Future Improvements
 
-The following features will be incorporated in future versions:
+### 
 
-- Variant annotation using ANNOVAR
-- Variant annotation using Ensembl VEP
-- Functional prediction using SIFT and PolyPhen
-- Visualization of variant statistics
-- Multi-sample comparative analysis
-- Automated HTML report generation
-- Workflow management using Snakemake
-- Containerization using Docker
+Future versions of this pipeline will support:
+
+- ANNOVAR-based variant annotation
+- Ensembl VEP annotation
+- Functional consequence prediction
+- Clinical significance annotation using ClinVar
+
+Example:
+
+```bash
+vep \
+-i variants.vcf \
+-o annotated_variants.txt \
+--cache \
+--assembly GRCh38
