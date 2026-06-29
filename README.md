@@ -27,3 +27,15 @@ Bioinformatics pipeline for identifying variants in STAT6 and FCER1A genes assoc
 ```bash
 chmod +x pipeline.sh
 ./pipeline.sh
+## Future Improvements
+
+The following features will be incorporated in future versions:
+
+- Variant annotation using ANNOVAR
+- Variant annotation using Ensembl VEP
+- Functional prediction using SIFT and PolyPhen
+- Visualization of variant statistics
+- Multi-sample comparative analysis
+- Automated HTML report generation
+- Workflow management using Snakemake
+- Containerization using Docker
