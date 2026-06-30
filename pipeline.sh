@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 ########################################################
 
@@ -23,12 +24,12 @@ THREADS=4
 
 if [ ! -f "${REF}.bwt" ]; then
 
-```
+
 echo "Indexing reference..."
 
 bwa index $REF
 samtools faidx $REF
-```
+
 
 fi
 
@@ -54,7 +55,7 @@ echo "========================================="
 
 if [ ! -f "${SAMPLE}_1.fastq" ]; then
 
-```
+
 echo "Downloading sample..."
 
 prefetch $SAMPLE
@@ -63,8 +64,10 @@ fasterq-dump $SAMPLE \
 -X 100000 \
 -e $THREADS \
 -p
-```
 
+if [ ! -f "${SAMPLE}_1.fastq" ]; then
+    echo "FASTQ download failed for $SAMPLE"
+    continue
 fi
 
 ########################################################
@@ -75,10 +78,10 @@ fi
 
 if [ ! -f "${SAMPLE}_1_fastqc.html" ]; then
 
-```
+
 fastqc ${SAMPLE}_1.fastq
 fastqc ${SAMPLE}_2.fastq
-```
+
 
 fi
 
@@ -90,7 +93,7 @@ fi
 
 if [ ! -f "${SAMPLE}_1_clean.fastq" ]; then
 
-```
+
 fastp \
 -i ${SAMPLE}_1.fastq \
 -I ${SAMPLE}_2.fastq \
@@ -102,7 +105,7 @@ fastp \
 -w $THREADS \
 -h ${SAMPLE}_fastp.html \
 -j ${SAMPLE}_fastp.json
-```
+
 
 fi
 
@@ -114,7 +117,7 @@ fi
 
 if [ ! -f "${SAMPLE}_sorted.bam" ]; then
 
-```
+
 bwa mem \
 -t $THREADS \
 $REF \
@@ -123,7 +126,7 @@ ${SAMPLE}_2_clean.fastq | \
 samtools sort \
 -@ $THREADS \
 -o ${SAMPLE}_sorted.bam
-```
+
 
 fi
 
@@ -135,9 +138,9 @@ fi
 
 if [ ! -f "${SAMPLE}_sorted.bam.bai" ]; then
 
-```
+
 samtools index ${SAMPLE}_sorted.bam
-```
+
 
 fi
 
@@ -149,7 +152,7 @@ fi
 
 if [ ! -f "${SAMPLE}_variants.vcf" ]; then
 
-```
+
 bcftools mpileup \
 -f $REF \
 ${SAMPLE}_sorted.bam | \
@@ -157,7 +160,7 @@ bcftools call \
 -mv \
 -Ov \
 -o ${SAMPLE}_variants.vcf
-```
+
 
 fi
 
@@ -167,15 +170,9 @@ fi
 
 ########################################################
 
-grep "NC_000012" 
-${SAMPLE}_variants.vcf \
+grep "NC_000012" "${SAMPLE}_variants.vcf" > "${SAMPLE}_STAT6.txt"
 
-> ${SAMPLE}_STAT6.txt
-
-grep "NC_000001" 
-${SAMPLE}_variants.vcf \
-
-> ${SAMPLE}_FCER1A.txt
+grep "NC_000001" "${SAMPLE}_variants.vcf" > "${SAMPLE}_FCER1A.txt"
 
 STAT6_COUNT=$(grep -v "^#" ${SAMPLE}_STAT6.txt | wc -l)
 
@@ -193,19 +190,17 @@ echo -e "Chromosome\tPosition\tREF\tALT\tQUAL" \
 
 > ${SAMPLE}_STAT6_table.tsv
 
-grep -v "^#" ${SAMPLE}_STAT6.txt | 
-awk '{print $1"\t"$2"\t"$4"\t"$5"\t"$6}' \
-
-> > ${SAMPLE}_STAT6_table.tsv
+grep -v "^#" "${SAMPLE}_STAT6.txt" | \
+awk '{print $1"\t"$2"\t"$4"\t"$5"\t"$6}' >> "${SAMPLE}_STAT6_table.tsv"
 
 echo -e "Chromosome\tPosition\tREF\tALT\tQUAL" \
 
 > ${SAMPLE}_FCER1A_table.tsv
 
-grep -v "^#" ${SAMPLE}_FCER1A.txt | 
-awk '{print $1"\t"$2"\t"$4"\t"$5"\t"$6}' \
+grep -v "^#" ${SAMPLE}_FCER1A.txt |  \
+awk '{print $1"\t"$2"\t"$4"\t"$5"\t"$6}' >> "${SAMPLE}_FCER1A_table.tsv"
 
-> > ${SAMPLE}_FCER1A_table.tsv
+
 
 ########################################################
 
@@ -249,42 +244,16 @@ EOF
 
 ########################################################
 
-echo "Food Allergy Variant Analysis Report" \
-
-> ${SAMPLE}_final_report.txt
-
-echo "===================================" \
-
-> > ${SAMPLE}_final_report.txt
-
-echo "" >> ${SAMPLE}_final_report.txt
-
-echo "Sample ID: $SAMPLE" \
-
-> > ${SAMPLE}_final_report.txt
-
-echo "Total Variants: $TOTAL" \
-
-> > ${SAMPLE}_final_report.txt
-
-echo "STAT6 Variants: $STAT6_COUNT" \
-
-> > ${SAMPLE}_final_report.txt
-
-echo "FCER1A Variants: $FCER1A_COUNT" \
-
-> > ${SAMPLE}_final_report.txt
-
-echo "" >> ${SAMPLE}_final_report.txt
-
-echo "SNP Distribution" \
-
-> > ${SAMPLE}_final_report.txt
-
-cat ${SAMPLE}_snp_statistics.txt \
-
-> > ${SAMPLE}_final_report.txt
-
+echo "Food Allergy Variant Analysis Report" > "${SAMPLE}_final_report.txt"
+echo "===================================" >> "${SAMPLE}_final_report.txt"
+echo "" >> "${SAMPLE}_final_report.txt"
+echo "Sample ID: $SAMPLE" >> "${SAMPLE}_final_report.txt"
+echo "Total Variants: $TOTAL" >> "${SAMPLE}_final_report.txt"
+echo "STAT6 Variants: $STAT6_COUNT" >> "${SAMPLE}_final_report.txt"
+echo "FCER1A Variants: $FCER1A_COUNT" >> "${SAMPLE}_final_report.txt"
+echo "" >> "${SAMPLE}_final_report.txt"
+echo "SNP Distribution" >> "${SAMPLE}_final_report.txt"
+cat "${SAMPLE}_snp_statistics.txt" >> "${SAMPLE}_final_report.txt"
 ########################################################
 
 # STEP 12: DISPLAY RESULTS
