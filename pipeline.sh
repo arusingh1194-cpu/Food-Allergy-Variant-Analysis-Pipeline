@@ -21,14 +21,18 @@ THREADS=4
 # REFERENCE INDEX
 
 ########################################################
-
+if [ ! -f "$REF" ]; then
+    echo "Reference genome $REF not found!"
+    exit 1
+fi
 if [ ! -f "${REF}.bwt" ]; then
 
 
 echo "Indexing reference..."
 
-bwa index $REF
-samtools faidx $REF
+bwa index "$REF"
+samtools faidx "$REF"
+
 
 
 fi
@@ -55,21 +59,21 @@ echo "========================================="
 
 if [ ! -f "${SAMPLE}_1.fastq" ]; then
 
+    echo "Downloading sample..."
 
-echo "Downloading sample..."
+    prefetch "$SAMPLE"
 
-prefetch $SAMPLE
+    fasterq-dump "$SAMPLE" \
+        -X 100000 \
+        -e "$THREADS" \
+        -p
 
-fasterq-dump $SAMPLE \
--X 100000 \
--e $THREADS \
--p
+    if [ ! -f "${SAMPLE}_1.fastq" ]; then
+        echo "FASTQ download failed."
+        continue
+    fi
 
-if [ ! -f "${SAMPLE}_1.fastq" ]; then
-    echo "FASTQ download failed for $SAMPLE"
-    continue
 fi
-
 ########################################################
 
 # STEP 2: FASTQC
@@ -79,7 +83,8 @@ fi
 if [ ! -f "${SAMPLE}_1_fastqc.html" ]; then
 
 
-fastqc ${SAMPLE}_1.fastq
+fastqc "${SAMPLE}_1.fastq"
+
 fastqc ${SAMPLE}_2.fastq
 
 
@@ -139,7 +144,7 @@ fi
 if [ ! -f "${SAMPLE}_sorted.bam.bai" ]; then
 
 
-samtools index ${SAMPLE}_sorted.bam
+samtools index "${SAMPLE}_sorted.bam"
 
 
 fi
@@ -186,16 +191,12 @@ TOTAL=$(grep -v "^#" ${SAMPLE}_variants.vcf | wc -l)
 
 ########################################################
 
-echo -e "Chromosome\tPosition\tREF\tALT\tQUAL" \
-
-> ${SAMPLE}_STAT6_table.tsv
+echo -e "Chromosome\tPosition\tREF\tALT\tQUAL" > "${SAMPLE}_STAT6_table.tsv"
 
 grep -v "^#" "${SAMPLE}_STAT6.txt" | \
 awk '{print $1"\t"$2"\t"$4"\t"$5"\t"$6}' >> "${SAMPLE}_STAT6_table.tsv"
 
-echo -e "Chromosome\tPosition\tREF\tALT\tQUAL" \
-
-> ${SAMPLE}_FCER1A_table.tsv
+echo -e "Chromosome\tPosition\tREF\tALT\tQUAL" > "${SAMPLE}_FCER1A_table.tsv"
 
 grep -v "^#" ${SAMPLE}_FCER1A.txt |  \
 awk '{print $1"\t"$2"\t"$4"\t"$5"\t"$6}' >> "${SAMPLE}_FCER1A_table.tsv"
@@ -208,12 +209,9 @@ awk '{print $1"\t"$2"\t"$4"\t"$5"\t"$6}' >> "${SAMPLE}_FCER1A_table.tsv"
 
 ########################################################
 
-grep -v "^#" ${SAMPLE}_variants.vcf | 
-awk '{print $4">"$5}' | 
-sort | uniq -c \
-
-> ${SAMPLE}_snp_statistics.txt
-
+grep -v "^#" "${SAMPLE}_variants.vcf" | \
+awk '{print $4">"$5}' | \
+sort | uniq -c > "${SAMPLE}_snp_statistics.txt"
 ########################################################
 
 # STEP 10: PLOT GENERATION
