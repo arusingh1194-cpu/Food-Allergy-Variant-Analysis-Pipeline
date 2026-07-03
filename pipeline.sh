@@ -113,7 +113,62 @@ process_sample() {
     log "========================================="
     log "Processing Sample: $SAMPLE"
     log "========================================="
+########################################################
+# DETECT DATA TYPE
+########################################################
 
+echo "Detecting input format..."
+
+FORMAT=$(vdb-dump "$SAMPLE" --info 2>/dev/null | awk -F': ' '/FMT/{print $2}')
+
+echo "Detected format: $FORMAT"
+
+########################################################
+# DOWNLOAD DATA
+########################################################
+
+if [[ "$FORMAT" == "FASTQ" || "$FORMAT" == "SRA" ]]; then
+
+    echo "Raw sequencing data detected."
+
+    if [[ ! -f "${SAMPLE}_1.fastq" && ! -f "${SAMPLE}_1.fastq.gz" ]]; then
+
+        prefetch "$SAMPLE"
+
+        fasterq-dump "$SAMPLE" \
+            -e "$THREADS" \
+            -p
+
+    fi
+
+    READ1="${SAMPLE}_1.fastq"
+    READ2="${SAMPLE}_2.fastq"
+
+elif [[ "$FORMAT" == "BAM" ]]; then
+
+    echo "Aligned BAM dataset detected."
+
+    if [[ ! -f "${SAMPLE}.bam" ]]; then
+
+        prefetch "$SAMPLE"
+
+        sam-dump "$SAMPLE" | samtools view -bS - > "${SAMPLE}.bam"
+
+    fi
+
+    cp "${SAMPLE}.bam" "${SAMPLE}_sorted.bam"
+
+    samtools index "${SAMPLE}_sorted.bam"
+
+    BAM_ALREADY_AVAILABLE=1
+
+else
+
+    echo "Unsupported format: $FORMAT"
+
+    continue
+
+fi
     # --- Download ---
     if [ ! -f "${SAMPLE}_1.fastq" ] || [ ! -f "${SAMPLE}_2.fastq" ]; then
         log "Downloading sample $SAMPLE..."
@@ -130,7 +185,17 @@ process_sample() {
     else
         log "FASTQ files already present for $SAMPLE. Skipping download."
     fi
+if [[ -z "${BAM_ALREADY_AVAILABLE:-}" ]]; then
+    fastqc "$READ1" "$READ2"
 
+    fastp \
+        -i "$READ1" \
+        -I "$READ2" \
+        -o "${SAMPLE}_1_clean.fastq" \
+        -O "${SAMPLE}_2_clean.fastq" \
+        -w "$THREADS"
+
+fi
     # --- FastQC (raw) ---
     if [ ! -f "${SAMPLE}_1_fastqc.html" ]; then
         log "Running FastQC on raw reads..."
@@ -157,21 +222,28 @@ process_sample() {
     else
         log "Trimmed reads already exist. Skipping fastp."
     fi
+########################################################
+# ALIGNMENT
+########################################################
 
-    # --- Alignment ---
-    if [ ! -f "${SAMPLE}_sorted.bam" ]; then
-        log "Aligning reads with bwa mem..."
-        bwa mem \
-            -t "$THREADS" \
-            "$REF" \
-            "${SAMPLE}_1_clean.fastq" \
-            "${SAMPLE}_2_clean.fastq" | \
-        samtools sort \
-            -@ "$THREADS" \
-            -o "${SAMPLE}_sorted.bam"
-    else
-        log "Sorted BAM already exists. Skipping alignment."
-    fi
+if [[ -z "${BAM_ALREADY_AVAILABLE:-}" ]]; then
+
+    bwa mem \
+        -t "$THREADS" \
+        "$REF" \
+        "$READ1" \
+        "$READ2" | \
+    samtools sort \
+        -@ "$THREADS" \
+        -o "${SAMPLE}_sorted.bam"
+
+    samtools index "${SAMPLE}_sorted.bam"
+
+else
+
+    echo "Alignment skipped (input already contains aligned BAM)."
+
+fi
 
     # --- BAM index ---
     if [ ! -f "${SAMPLE}_sorted.bam.bai" ]; then
